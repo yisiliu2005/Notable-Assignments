@@ -1,0 +1,8 @@
+mySA: main.c
+	gcc -o mySA main.c
+
+execute:
+	./mySA vader_lexicon.txt validation.txt
+
+clean:
+	rm mySA
