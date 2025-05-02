@@ -1,0 +1,117 @@
+-- Student number: 400494848, MacID: liu1857;
+
+-- Query 1
+
+--ncopies
+CREATE VIEW ncopies AS 
+	SELECT book_id, COUNT(*) AS ncopies FROM BOOKCOPY GROUP BY book_id;
+
+--nloans (not accounting for 0 loans yet)
+CREATE VIEW BOOKLOAN AS
+	SELECT * FROM BOOKCOPY BC JOIN LOAN L ON BC.ID = L.COPY_ID;
+
+CREATE VIEW nloans AS 
+	SELECT book_id, COUNT(*) AS nloans FROM BOOKLOAN GROUP BY book_id;
+
+--newest
+CREATE VIEW newest AS 
+	SELECT book_id, MAX(date) AS newest FROM BOOKCOPY GROUP BY book_id;
+
+--query
+SELECT nc.book_id AS id, 
+		nc.ncopies AS ncopies,
+		COALESCE(nl.nloans,0) AS nloans,
+		nw.newest AS newest
+FROM (ncopies nc JOIN newest nw ON nc.book_id = nw.book_id)
+		LEFT JOIN nloans nl ON nc.book_id = nl.book_id ;
+
+DROP VIEW ncopies;
+DROP VIEW nloans;
+DROP VIEW newest;
+-- Clarifications: [any description].
+
+
+-- Query 2
+
+--all recipient, rec source pairs
+CREATE VIEW recpairs AS 
+	SELECT DISTINCT b1.customer_id AS recipient, b2.customer_id AS rec_source
+	FROM BOOKLOAN b1, BOOKLOAN b2
+	WHERE NOT EXISTS (SELECT DISTINCT c1.book_id FROM BOOKLOAN c1 WHERE c1.customer_id = b1.customer_id
+			EXCEPT SELECT DISTINCT c2.book_id FROM BOOKLOAN c2 WHERE c2.customer_id = b2.customer_id) ;
+
+--recipient paired with all books rec source has read
+SELECT DISTINCT r.recipient AS customer_id, b.book_id AS book_id
+FROM recpairs r JOIN BOOKLOAN b ON r.rec_source = b.customer_id
+--remove books recipient has already read
+EXCEPT 
+SELECT r.recipient AS customer_id, b.book_id AS book_id
+FROM recpairs r JOIN BOOKLOAN b ON r.recipient = b.customer_id ;
+
+DROP VIEW recpairs;
+-- Clarifications: if a customer has loaned a book, they're assumed to have read it.
+-- If a customer has not loaned a book, they're assumed to not have read it. 
+--If a customer only reviewed a book without having loaned it, they're assumed to have not read it.
+--If a customer has not loaned any books ever, they will recieve no recommendations.  
+
+
+-- Query 3
+
+--list of positive reviews
+CREATE VIEW pos_review AS
+	SELECT * FROM REVIEW r
+	WHERE r.score > (SELECT AVG(rc.score) FROM review rc 
+					WHERE rc.customer_id = r.customer_id AND rc.when < r.when);
+
+--list of non-positive reviews
+CREATE VIEW neg_review AS
+	SELECT * FROM REVIEW
+	EXCEPT 
+	SELECT * FROM pos_review ;
+
+--query
+SELECT DISTINCT r.book_id AS id FROM REVIEW r 
+WHERE (SELECT COUNT(*) FROM pos_review pr WHERE pr.book_id = r.book_id) 
+	> (SELECT COUNT(*) FROM neg_review nr WHERE nr.book_id = r.book_id);
+
+DROP VIEW pos_review;
+DROP VIEW neg_review;
+-- Clarifications: any review that is not positive is considered non-positive, including neutral.
+
+
+-- Query 4
+
+--review loan
+CREATE VIEW loan_review AS
+	SELECT bl.book_id AS book_id, bl.copy_id AS copy_id, bl.customer_id AS customer_id, bl.since AS since,
+	r.when AS rwhen, r.score AS score FROM 
+	BOOKLOAN bl JOIN REVIEW r ON bl.book_id = r.book_id AND bl.customer_id = r.customer_id AND bl.since < r.when;
+
+--get rid of not most recently loaned copy for review
+CREATE VIEW copy_review AS 
+	SELECT * FROM loan_review lr
+	WHERE lr.since >= ALL(SELECT lr2.since FROM loan_review lr2 
+							WHERE lr.book_id = lr2.book_id AND 
+							lr.customer_id = lr2.customer_id AND
+							lr.rwhen = lr2.rwhen);
+
+--average review score per book copy
+CREATE VIEW copy_avg AS 
+	SELECT copy_id, AVG(score) AS score FROM copy_review GROUP BY copy_id;
+
+--decrease due to age of books
+WITH info AS (
+	SELECT cr.copy_id AS copy_id, cr.score AS score, bc.book_id AS id, bc.date AS date
+	FROM copy_avg cr JOIN BOOKCOPY bc ON cr.copy_id = bc.id
+)
+SELECT id FROM info i0
+WHERE NOT EXISTS (SELECT * FROM info i1 JOIN info i2 ON i1.id = i2.id
+				WHERE i0.id = i1.id AND i1.score > i2.score AND i1.date < i2.date);
+
+DROP VIEW loan_review;
+DROP VIEW copy_review;
+DROP VIEW copy_avg;
+-- Clarifications: does not ignore books with at-most one copy with review even though question said we could
+-- because it only gets rid of books where any older copy has a higher average score than a more recent copy.
+
+DROP VIEW BOOKLOAN;
