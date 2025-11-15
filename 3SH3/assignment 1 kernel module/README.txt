@@ -1,0 +1,1 @@
+We found that this assignment was hard to split into two parts of work, so we each worked on it separately and then came together to check our work. The version being submitted is Yisi Liu’s, however Jinny Kim’s version is very very similar, and functions the same. Credit goes equally to both of us. 
